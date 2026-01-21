@@ -1,0 +1,119 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Download repository code
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      # Step 2: Set up Python environment
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      # Step 3: Log in to Docker Hub
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # Step 4: Extract git commit hash (for tagging)
+      - name: Extract git commit hash
+        shell: bash
+        run: echo "commit_hash=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      # Step 5: Build Docker images
+      - name: Build Backend Docker image
+        run: |
+          docker build \
+            -t ${{ secrets.DOCKER_USERNAME }}/trinity-grocery-api:${{ env.commit_hash }} \
+            -t ${{ secrets.DOCKER_USERNAME }}/trinity-grocery-api:latest \
+            -f backend/Dockerfile \
+            backend
+
+      - name: Build Frontend Docker image
+        run: |
+          docker build \
+            -t ${{ secrets.DOCKER_USERNAME }}/trinity-grocery-frontend:${{ env.commit_hash }} \
+            -t ${{ secrets.DOCKER_USERNAME }}/trinity-grocery-frontend:latest \
+            -f Frontend/Dockerfile \
+            Frontend
+
+      # Step 6: Push Docker images to Docker Hub
+      - name: Push Docker images to Docker Hub
+        run: |
+          docker push ${{ secrets.DOCKER_USERNAME }}/trinity-grocery-api:${{ env.commit_hash }}
+          docker push ${{ secrets.DOCKER_USERNAME }}/trinity-grocery-api:latest
+          docker push ${{ secrets.DOCKER_USERNAME }}/trinity-grocery-frontend:${{ env.commit_hash }}
+          docker push ${{ secrets.DOCKER_USERNAME }}/trinity-grocery-frontend:latest
+
+      # Step 7: Verify SSH secret
+      - name: Verify SSH secret
+        run: |
+          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "SSH_PRIVATE_KEY is empty or missing."
+            exit 1
+          fi
+          if ! printf '%s' "${{ secrets.SSH_PRIVATE_KEY }}" | head -n 1 | grep -q "BEGIN OPENSSH PRIVATE KEY"; then
+            echo "SSH_PRIVATE_KEY does not look like a private key."
+            exit 1
+          fi
+
+      # Step 8: Prepare SSH key
+      - name: Prepare SSH key
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      # Step 9: Create environment file and upload to EC2
+      - name: Upload compose files and env
+        run: |
+          cat > /tmp/trinity.env <<EOF
+          DOCKER_IMAGE=${{ secrets.DOCKER_USERNAME }}/trinity-grocery-api:latest
+          FRONTEND_IMAGE=${{ secrets.DOCKER_USERNAME }}/trinity-grocery-frontend:latest
+          PGUSER=${{ secrets.PGUSER }}
+          PGPASSWORD=${{ secrets.PGPASSWORD }}
+          PGDATABASE=${{ secrets.PGDATABASE }}
+          SECRET_KEY=${{ secrets.SECRET_KEY }}
+          JWT_SECRET_KEY=${{ secrets.JWT_SECRET_KEY }}
+          EOF
+          scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no \
+            backend/docker-compose.yml backend/docker-compose.prod.yml /tmp/trinity.env \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ secrets.EC2_APP_DIR }}/
+
+      # Step 10: Deploy to EC2 via SSH
+      - name: Deploy to EC2 via SSH
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} <<'EOF'
+          set -e
+          APP_DIR="${{ secrets.EC2_APP_DIR }}"
+
+          mkdir -p "$APP_DIR"
+          cd "$APP_DIR"
+
+          echo "Pulling latest image and starting services..."
+          mv trinity.env .env
+          docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml pull
+          docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
+
+          echo "Running database migrations..."
+          docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml exec -T web flask db upgrade
+
+          echo "Seeding admin user..."
+          docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml exec -T web python scripts/seed_admin.py
+
+          echo "Deployment completed successfully!"
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
+          EOF
