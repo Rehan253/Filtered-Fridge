@@ -71,17 +71,23 @@ jobs:
       # Step 8: Prepare SSH key
       - name: Prepare SSH key
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           if [ -z "${{ secrets.EC2_HOST }}" ]; then
             echo "EC2_HOST is empty or missing."
             exit 1
           fi
           mkdir -p "$HOME/.ssh"
           chmod 700 "$HOME/.ssh"
-          echo "Key header: $(printf '%s' "${{ secrets.SSH_PRIVATE_KEY }}" | head -n 1 | tr -d '\r')"
-          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > "$HOME/.ssh/id_ed25519"
+          if [ -n "${{ secrets.SSH_PRIVATE_KEY_B64 || '' }}" ]; then
+            echo "${{ secrets.SSH_PRIVATE_KEY_B64 }}" | base64 --decode > "$HOME/.ssh/id_ed25519"
+          else
+            printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > "$HOME/.ssh/id_ed25519"
+          fi
           chmod 600 "$HOME/.ssh/id_ed25519"
-          ssh-keygen -y -f "$HOME/.ssh/id_ed25519" > /dev/null
+          if ! ssh-keygen -y -f "$HOME/.ssh/id_ed25519" > /dev/null 2>&1; then
+            echo "Invalid SSH_PRIVATE_KEY. Recreate the secret (or use SSH_PRIVATE_KEY_B64)."
+            exit 1
+          fi
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> "$HOME/.ssh/known_hosts"
 
       # Step 9: Create environment file and upload to EC2
