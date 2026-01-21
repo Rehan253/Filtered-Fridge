@@ -71,10 +71,15 @@ jobs:
       # Step 8: Prepare SSH key
       - name: Prepare SSH key
         run: |
+          if [ -z "${{ secrets.EC2_HOST }}" ]; then
+            echo "EC2_HOST is empty or missing."
+            exit 1
+          fi
           mkdir -p "$HOME/.ssh"
           chmod 700 "$HOME/.ssh"
-          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > "$HOME/.ssh/id_ed25519"
           chmod 600 "$HOME/.ssh/id_ed25519"
+          ssh-keygen -y -f "$HOME/.ssh/id_ed25519" > /dev/null
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> "$HOME/.ssh/known_hosts"
 
       # Step 9: Create environment file and upload to EC2
