@@ -63,8 +63,8 @@ jobs:
             echo "SSH_PRIVATE_KEY is empty or missing."
             exit 1
           fi
-          if ! printf '%s' "${{ secrets.SSH_PRIVATE_KEY }}" | head -n 1 | grep -q "BEGIN OPENSSH PRIVATE KEY"; then
-            echo "SSH_PRIVATE_KEY does not look like a private key."
+          if ! printf '%s' "${{ secrets.SSH_PRIVATE_KEY }}" | head -n 1 | grep -Eq "BEGIN (OPENSSH|RSA) PRIVATE KEY"; then
+            echo "SSH_PRIVATE_KEY does not look like an OpenSSH or RSA private key."
             exit 1
           fi
 
