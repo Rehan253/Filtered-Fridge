@@ -71,12 +71,14 @@ jobs:
       # Step 8: Prepare SSH key
       - name: Prepare SSH key
         run: |
+          set -euxo pipefail
           if [ -z "${{ secrets.EC2_HOST }}" ]; then
             echo "EC2_HOST is empty or missing."
             exit 1
           fi
           mkdir -p "$HOME/.ssh"
           chmod 700 "$HOME/.ssh"
+          echo "Key header: $(printf '%s' "${{ secrets.SSH_PRIVATE_KEY }}" | head -n 1 | tr -d '\r')"
           printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > "$HOME/.ssh/id_ed25519"
           chmod 600 "$HOME/.ssh/id_ed25519"
           ssh-keygen -y -f "$HOME/.ssh/id_ed25519" > /dev/null
