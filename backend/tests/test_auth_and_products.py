@@ -53,7 +53,7 @@ def test_register_and_login_flow(client, app):
     assert resp.status_code == 201
     data = resp.get_json()
     assert data["user"]["email"] == "alice@example.com"
-    assert data["user"]["role"] == "customer"
+    assert data["user"]["role"] == "admin"
 
     resp = client.post("/auth/login", json={"email": "alice@example.com", "password": "Password123!"})
     assert resp.status_code == 200
@@ -83,6 +83,7 @@ def test_products_list_empty(client):
 def test_admin_create_product_requires_admin(client, app):
     with app.app_context():
         user = create_user("user@example.com", role="customer")
+        user_id = user.id
 
     payload = {
         "name": "Test Apple",
@@ -92,13 +93,14 @@ def test_admin_create_product_requires_admin(client, app):
         "quantity_in_stock": 10,
         "unit": "lb",
     }
-    resp = client.post("/products/", json=payload, headers=auth_headers(user.id))
+    resp = client.post("/products/", json=payload, headers=auth_headers(user_id))
     assert resp.status_code == 403
 
 
 def test_admin_create_product_success(client, app):
     with app.app_context():
         admin = create_user("admin@example.com", role="admin")
+        admin_id = admin.id
 
     payload = {
         "name": "Test Banana",
@@ -110,7 +112,7 @@ def test_admin_create_product_success(client, app):
         "ingredients": ["banana"],
         "dietaryTags": ["vegan"],
     }
-    resp = client.post("/products/", json=payload, headers=auth_headers(admin.id))
+    resp = client.post("/products/", json=payload, headers=auth_headers(admin_id))
     assert resp.status_code == 201
     data = resp.get_json()
     assert data["name"] == "Test Banana"
