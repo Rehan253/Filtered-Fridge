@@ -1,0 +1,61 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:15
+    container_name: trinity-postgres
+    environment:
+      POSTGRES_USER: ${PGUSER:?PGUSER is required}
+      POSTGRES_PASSWORD: ${PGPASSWORD:?PGPASSWORD is required}
+      POSTGRES_DB: ${PGDATABASE:?PGDATABASE is required}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${PGUSER}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  web:
+    image: ${DOCKER_IMAGE:?DOCKER_IMAGE is required}
+    container_name: trinity-api
+    working_dir: /app
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${PGUSER}:${PGPASSWORD}@db:5432/${PGDATABASE}
+      PGUSER: ${PGUSER}
+      PGPASSWORD: ${PGPASSWORD}
+      PGDATABASE: ${PGDATABASE}
+      PGHOST: db
+      PGPORT: 5432
+      FLASK_APP: app.py
+      FLASK_ENV: production
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
+      PORT: 5000
+      PYTHONPATH: /app
+    command: [ "gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "app:app" ]
+    volumes: []
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:5000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  frontend:
+    image: ${FRONTEND_IMAGE:?FRONTEND_IMAGE is required}
+    container_name: trinity-frontend
+    ports:
+      - "80:80"
+    restart: unless-stopped
+    depends_on:
+      - web
